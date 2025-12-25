@@ -1,0 +1,25 @@
+# Core libraries
+numpy>=1.21.0
+scipy>=1.7.0
+librosa>=0.9.0
+
+# Pitch Detection - CREPE (Recommended, works with latest TensorFlow)
+crepe>=0.0.12
+tensorflow>=2.8.0
+
+# Pitch Detection - Basic Pitch (Optional - NOT RECOMMENDED)
+# Basic Pitch requires TensorFlow < 2.15.1 which conflicts with Python 3.12+
+# If you really need Basic Pitch, you may need to use Python 3.10 or 3.11
+# basic-pitch>=0.4.0
+
+# DTW (Dynamic Time Warping)
+fastdtw>=0.3.4
+
+# MIDI processing (if using MIDI reference)
+mido>=1.2.10
+
+# Utilities
+soundfile>=0.10.0
+
+# GUI (optional - only needed if using GUI)
+matplotlib>=3.5.0
