@@ -12,12 +12,14 @@ warnings.filterwarnings('ignore')
 class PitchMatcher:
     """Lớp so khớp pitch và tính điểm"""
     
-    def __init__(self, tolerance_cents: float = 50.0):
+    def __init__(self, tolerance_cents: float = 75.0, difficulty_mode: str = 'normal'):
         """
         Args:
-            tolerance_cents: Độ lệch cho phép tính bằng cents (50 cents ≈ 1/4 tone)
+            tolerance_cents: Độ lệch cho phép tính bằng cents (75 cents mặc định - dễ hơn)
+            difficulty_mode: 'easy', 'normal', 'hard' - điều chỉnh độ khó chấm điểm
         """
         self.tolerance_cents = tolerance_cents
+        self.difficulty_mode = difficulty_mode
     
     def interpolate_pitch(self, time: np.ndarray, frequency: np.ndarray, 
                          target_times: np.ndarray) -> np.ndarray:
@@ -128,14 +130,14 @@ class PitchMatcher:
     
     def calculate_accuracy(self, pitch_user: np.ndarray, pitch_reference: np.ndarray) -> float:
         """
-        Tính độ chính xác pitch (tỷ lệ các nốt trong tolerance)
+        Tính độ chính xác pitch với điểm trung gian (graded scoring)
         
         Args:
             pitch_user: Pitch người hát (cents)
             pitch_reference: Pitch chuẩn (cents)
         
         Returns:
-            Độ chính xác (0-1)
+            Độ chính xác (0-1) với điểm trung gian
         """
         if len(pitch_user) == 0 or len(pitch_reference) == 0:
             return 0.0
@@ -158,10 +160,42 @@ class PitchMatcher:
         # Tính độ lệch
         deviation = np.abs(pitch_user_valid - pitch_reference_valid)
         
-        # Đếm số điểm trong tolerance
-        in_tolerance = np.sum(deviation <= self.tolerance_cents)
+        # Tính điểm với hệ thống điểm trung gian (graded scoring) - CẢI THIỆN ĐỂ DỄ HƠN
+        # Điểm giảm dần theo độ lệch thay vì chỉ đúng/sai
+        # Mở rộng phạm vi để cho điểm cao hơn
+        tolerance_strict = self.tolerance_cents * 0.6   # 60% tolerance = điểm cao (tăng từ 50%)
+        tolerance_normal = self.tolerance_cents * 1.2    # 120% tolerance = điểm trung bình (tăng từ 100%)
+        tolerance_loose = self.tolerance_cents * 3.0     # 300% tolerance = điểm thấp nhưng vẫn có điểm (tăng từ 200%)
+        tolerance_very_loose = self.tolerance_cents * 5.0  # 500% tolerance = vẫn có điểm nhỏ
         
-        accuracy = in_tolerance / len(deviation)
+        # Tính điểm cho từng điểm pitch
+        scores = np.zeros_like(deviation)
+        
+        # Điểm cao (1.0) nếu trong tolerance_strict
+        scores[deviation <= tolerance_strict] = 1.0
+        
+        # Điểm trung bình cao (0.7-0.99) nếu trong tolerance_normal nhưng ngoài tolerance_strict
+        mask_normal = (deviation > tolerance_strict) & (deviation <= tolerance_normal)
+        if np.any(mask_normal):
+            # Điểm giảm tuyến tính từ 0.99 xuống 0.7 (tăng từ 0.5)
+            scores[mask_normal] = 0.99 - 0.29 * (deviation[mask_normal] - tolerance_strict) / (tolerance_normal - tolerance_strict)
+        
+        # Điểm trung bình (0.4-0.69) nếu trong tolerance_loose nhưng ngoài tolerance_normal
+        mask_loose = (deviation > tolerance_normal) & (deviation <= tolerance_loose)
+        if np.any(mask_loose):
+            # Điểm giảm tuyến tính từ 0.69 xuống 0.4 (tăng từ 0.49)
+            scores[mask_loose] = 0.69 - 0.29 * (deviation[mask_loose] - tolerance_normal) / (tolerance_loose - tolerance_normal)
+        
+        # Điểm thấp (0.1-0.39) nếu trong tolerance_very_loose nhưng ngoài tolerance_loose
+        mask_very_loose = (deviation > tolerance_loose) & (deviation <= tolerance_very_loose)
+        if np.any(mask_very_loose):
+            # Điểm giảm tuyến tính từ 0.39 xuống 0.1
+            scores[mask_very_loose] = 0.39 - 0.29 * (deviation[mask_very_loose] - tolerance_loose) / (tolerance_very_loose - tolerance_loose)
+        
+        # Điểm 0 nếu ngoài tolerance_very_loose (nhưng không bị trừ điểm)
+        
+        # Tính accuracy trung bình
+        accuracy = np.mean(scores)
         return accuracy
     
     def calculate_score(self, time_user: np.ndarray, freq_user: np.ndarray,
@@ -197,11 +231,26 @@ class PitchMatcher:
         dtw_distance, dtw_path = self.calculate_dtw_distance(cents_user, cents_reference)
         
         # Normalize DTW distance thành điểm (0-100)
-        # Sử dụng công thức: score = max(0, 100 - (distance / max_distance) * 100)
-        # max_distance ước tính dựa trên độ dài chuỗi
-        max_expected_distance = len(aligned_time) * self.tolerance_cents * 2
+        # Cải thiện công thức để dễ đạt điểm cao hơn
+        # Điều chỉnh max_distance dựa trên difficulty mode
+        if self.difficulty_mode == 'easy':
+            # Chế độ dễ: tăng max_distance lên 5x để dễ đạt điểm cao hơn
+            multiplier = 5.0
+        elif self.difficulty_mode == 'normal':
+            # Chế độ vừa: tăng max_distance lên 3.5x
+            multiplier = 3.5
+        else:  # hard
+            # Chế độ khó: tăng lên 2.5x (vẫn dễ hơn trước)
+            multiplier = 2.5
+        
+        max_expected_distance = len(aligned_time) * self.tolerance_cents * multiplier
+        
         if max_expected_distance > 0:
-            dtw_score = max(0, 100 - (dtw_distance / max_expected_distance) * 100)
+            # Công thức cải thiện: sử dụng căn bậc 3 để làm mềm đường cong điểm hơn nữa
+            # Điều này giúp điểm giảm chậm hơn nhiều khi có sai lệch
+            normalized_distance = min(1.0, dtw_distance / max_expected_distance)
+            # Sử dụng căn bậc 3 thay vì căn bậc 2 để dễ hơn
+            dtw_score = 100 * (1.0 - np.power(normalized_distance, 1.0/3.0))
         else:
             dtw_score = 0.0
         
@@ -214,9 +263,30 @@ class PitchMatcher:
             mae_cents = float('inf')
         
         # Điểm tổng hợp (weighted average)
-        # Accuracy: 60%, DTW Score: 40%
+        # Điều chỉnh tỷ lệ dựa trên difficulty mode - ƯU TIÊN ACCURACY HƠN
+        if self.difficulty_mode == 'easy':
+            # Chế độ dễ: ưu tiên accuracy rất nhiều (80% accuracy, 20% DTW)
+            accuracy_weight = 80
+            dtw_weight = 20
+        elif self.difficulty_mode == 'normal':
+            # Chế độ vừa: ưu tiên accuracy (75% accuracy, 25% DTW)
+            accuracy_weight = 75
+            dtw_weight = 25
+        else:  # hard
+            # Chế độ khó: cân bằng hơn (70% accuracy, 30% DTW)
+            accuracy_weight = 70
+            dtw_weight = 30
+        
         # accuracy là 0-1, dtw_score là 0-100
-        final_score = accuracy * 60 + (dtw_score / 100) * 40
+        final_score = accuracy * accuracy_weight + (dtw_score / 100) * dtw_weight
+        
+        # Đảm bảo điểm không vượt quá 100
+        final_score = min(100.0, final_score)
+        
+        # Bonus: Nếu accuracy > 0.5, thêm điểm bonus nhỏ để khuyến khích
+        if accuracy > 0.5:
+            bonus = (accuracy - 0.5) * 5  # Tối đa 2.5 điểm bonus
+            final_score = min(100.0, final_score + bonus)
         
         return {
             'final_score': round(final_score, 2),

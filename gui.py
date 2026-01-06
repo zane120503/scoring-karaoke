@@ -10,6 +10,7 @@ from pathlib import Path
 import json
 from pitch_extractor import PitchExtractor
 from pitch_matcher import PitchMatcher
+from pitch_advisor import PitchAdvisor
 
 
 class KaraokeScorerGUI:
@@ -18,15 +19,31 @@ class KaraokeScorerGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("🎤 Karaoke Scoring System")
-        self.root.geometry("900x750")
+        self.root.geometry("1000x900")  # Tăng kích thước để hiển thị đầy đủ
         self.root.resizable(True, True)
+        # Đặt cửa sổ ở giữa màn hình
+        self.root.update_idletasks()
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry(f'{width}x{height}+{x}+{y}')
         
         # Biến lưu trữ
         self.user_audio_path = tk.StringVar()
         self.reference_path = tk.StringVar()
         self.method_var = tk.StringVar(value="crepe")
-        self.tolerance_var = tk.DoubleVar(value=50.0)
+        self.tolerance_var = tk.DoubleVar(value=200.0)  # Mặc định 200 cents (rất dễ)
+        self.difficulty_var = tk.StringVar(value="easy")  # Thêm chế độ độ khó
+        self.normalize_audio_var = tk.BooleanVar(value=True)  # Normalize audio mặc định bật
+        self.midi_track_var = tk.StringVar(value="auto")
+        self.midi_pitch_min_var = tk.DoubleVar(value=80.0)
+        self.midi_pitch_max_var = tk.DoubleVar(value=2000.0)
+        self.use_pitch_filter_var = tk.BooleanVar(value=False)
         self.is_processing = False
+        
+        # Lưu pitch data để phân tích
+        self.last_pitch_data = None  # (time_user, freq_user, time_ref, freq_ref)
         
         # Tạo giao diện
         self.create_widgets()
@@ -81,8 +98,8 @@ class KaraokeScorerGUI:
             command=self.browse_user_audio
         ).grid(row=0, column=2, padx=5, pady=5)
         
-        # File reference
-        ttk.Label(input_frame, text="File reference:", style='Heading.TLabel').grid(
+        # File reference (ca sĩ mẫu)
+        ttk.Label(input_frame, text="Audio ca sĩ mẫu:", style='Heading.TLabel').grid(
             row=1, column=0, sticky=tk.W, pady=5
         )
         ttk.Entry(input_frame, textvariable=self.reference_path, width=50).grid(
@@ -96,8 +113,8 @@ class KaraokeScorerGUI:
         
         ttk.Label(
             input_frame, 
-            text="(MIDI hoặc Audio)", 
-            font=('Arial', 9), 
+            text="(Audio ca sĩ mẫu - chỉ giọng hoặc giọng+beat, WAV/MP3/FLAC)", 
+            font=('Arial', 8), 
             foreground='gray'
         ).grid(row=2, column=1, sticky=tk.W, padx=5)
         
@@ -134,8 +151,8 @@ class KaraokeScorerGUI:
         
         tolerance_scale = ttk.Scale(
             tolerance_frame,
-            from_=25.0,
-            to=100.0,
+            from_=50.0,
+            to=300.0,  # Tăng phạm vi lên 300 để có thể điều chỉnh cao hơn
             variable=self.tolerance_var,
             orient=tk.HORIZONTAL,
             length=300
@@ -147,10 +164,58 @@ class KaraokeScorerGUI:
         
         ttk.Label(
             tolerance_frame, 
-            text="(25=chặt, 50=vừa, 100=dễ)", 
+            text="(50=chặt, 100=vừa, 200=dễ, 300=rất dễ)", 
             font=('Arial', 9), 
             foreground='gray'
         ).pack(side=tk.LEFT, padx=10)
+        
+        # Chế độ độ khó
+        ttk.Label(settings_frame, text="Độ khó:", style='Heading.TLabel').grid(
+            row=2, column=0, sticky=tk.W, pady=5
+        )
+        difficulty_frame = ttk.Frame(settings_frame)
+        difficulty_frame.grid(row=2, column=1, sticky=tk.W, padx=5, pady=5)
+        ttk.Radiobutton(
+            difficulty_frame, 
+            text="Dễ (Khuyến nghị)", 
+            variable=self.difficulty_var, 
+            value="easy"
+        ).pack(side=tk.LEFT, padx=10)
+        ttk.Radiobutton(
+            difficulty_frame, 
+            text="Vừa", 
+            variable=self.difficulty_var, 
+            value="normal"
+        ).pack(side=tk.LEFT, padx=10)
+        ttk.Radiobutton(
+            difficulty_frame, 
+            text="Khó", 
+            variable=self.difficulty_var, 
+            value="hard"
+        ).pack(side=tk.LEFT, padx=10)
+        
+        # Normalize Audio
+        ttk.Label(settings_frame, text="Normalize Audio:", style='Heading.TLabel').grid(
+            row=3, column=0, sticky=tk.W, pady=5
+        )
+        normalize_frame = ttk.Frame(settings_frame)
+        normalize_frame.grid(row=3, column=1, sticky=tk.W, padx=5, pady=5)
+        ttk.Checkbutton(
+            normalize_frame,
+            text="Chuẩn hóa âm lượng (Khuyến nghị)",
+            variable=self.normalize_audio_var
+        ).pack(side=tk.LEFT, padx=5)
+        ttk.Label(
+            normalize_frame,
+            text="(Giúp công bằng khi so sánh 2 file có volume khác nhau)",
+            font=('Arial', 8),
+            foreground='gray'
+        ).pack(side=tk.LEFT, padx=10)
+        
+        # MIDI Settings - Ẩn vì không còn sử dụng (chỉ dùng audio với audio)
+        # Giữ lại code để tương thích ngược nếu cần
+        # self.midi_settings_frame = ttk.LabelFrame(settings_frame, text="🎼 MIDI Settings", padding="10")
+        # self.midi_settings_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
         
         # === NÚT CHẠY ===
         button_frame = ttk.Frame(main_frame)
@@ -214,7 +279,7 @@ class KaraokeScorerGUI:
         # Các metrics chi tiết
         self.metrics_frame = ttk.Frame(results_frame)
         self.metrics_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=10)
-        self.metrics_frame.columnconfigure(0, weight=1)
+        # Cho cột 1 (giá trị bên trái) co giãn để đẩy nhóm cột bên phải ra sát phải hơn
         self.metrics_frame.columnconfigure(1, weight=1)
         
         self.metrics_labels = {}
@@ -234,15 +299,48 @@ class KaraokeScorerGUI:
                 self.metrics_frame,
                 text=label,
                 style='Heading.TLabel'
-            ).grid(row=row, column=col, sticky=tk.W, padx=10, pady=5)
+            ).grid(row=row, column=col, sticky=tk.W, padx=(10, 5), pady=5)
             
             value_label = ttk.Label(
                 self.metrics_frame,
                 text="--",
                 font=('Arial', 10)
             )
-            value_label.grid(row=row, column=col+1, sticky=tk.W, padx=5, pady=5)
+            # Đẩy số sang bên phải thêm một chút (padding trái = 15)
+            value_label.grid(row=row, column=col+1, sticky=tk.W, padx=(15, 20), pady=5)
             self.metrics_labels[key] = value_label
+        
+        # Phần lời khuyên
+        advice_label = ttk.Label(
+            results_frame,
+            text="💡 Lời Khuyên:",
+            style='Heading.TLabel',
+            font=('Arial', 11, 'bold')
+        )
+        advice_label.grid(row=2, column=0, sticky=tk.W, pady=(15, 5))
+        
+        # Text widget để hiển thị lời khuyên (có scrollbar)
+        advice_frame = ttk.Frame(results_frame)
+        advice_frame.grid(row=3, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
+        advice_frame.columnconfigure(0, weight=1)
+        advice_frame.rowconfigure(0, weight=1)
+        results_frame.rowconfigure(3, weight=1)
+        
+        self.advice_text = tk.Text(
+            advice_frame,
+            wrap=tk.WORD,
+            height=10,  # Tăng chiều cao ô lời khuyên
+            font=('Arial', 9),
+            bg='#F5F5F5',
+            relief=tk.FLAT,
+            padx=10,
+            pady=10
+        )
+        self.advice_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        advice_scrollbar = ttk.Scrollbar(advice_frame, orient=tk.VERTICAL, command=self.advice_text.yview)
+        advice_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        self.advice_text.configure(yscrollcommand=advice_scrollbar.set)
         
         # Lưu kết quả
         self.current_results = None
@@ -260,12 +358,13 @@ class KaraokeScorerGUI:
             self.user_audio_path.set(filename)
     
     def browse_reference(self):
-        """Chọn file reference"""
+        """Chọn file audio ca sĩ mẫu"""
         filename = filedialog.askopenfilename(
-            title="Chọn file reference (MIDI hoặc Audio)",
+            title="Chọn file audio ca sĩ mẫu",
             filetypes=[
-                ("MIDI files", "*.mid *.midi"),
                 ("Audio files", "*.wav *.mp3 *.flac *.m4a *.ogg"),
+                ("WAV files", "*.wav"),
+                ("MP3 files", "*.mp3"),
                 ("All files", "*.*")
             ]
         )
@@ -283,11 +382,11 @@ class KaraokeScorerGUI:
             return False
         
         if not self.reference_path.get():
-            messagebox.showerror("Lỗi", "Vui lòng chọn file reference!")
+            messagebox.showerror("Lỗi", "Vui lòng chọn file audio ca sĩ mẫu!")
             return False
         
         if not os.path.exists(self.reference_path.get()):
-            messagebox.showerror("Lỗi", "File reference không tồn tại!")
+            messagebox.showerror("Lỗi", "File audio ca sĩ mẫu không tồn tại!")
             return False
         
         return True
@@ -316,29 +415,74 @@ class KaraokeScorerGUI:
             ref_path = self.reference_path.get()
             method = self.method_var.get()
             tolerance = self.tolerance_var.get()
+            difficulty = self.difficulty_var.get()  # Lấy chế độ độ khó
+            normalize_audio = self.normalize_audio_var.get()  # Lấy tùy chọn normalize
             
             # Trích xuất pitch từ audio người hát
+            # Sử dụng tiny model và không dùng viterbi để tăng tốc độ (~10s cho bài hát)
             self.update_progress("⏳ Đang trích xuất pitch từ audio người hát...")
-            extractor_user = PitchExtractor(method=method)
-            time_user, freq_user = extractor_user.extract_pitch(user_path)
+            extractor_user = PitchExtractor(method=method, model_capacity='tiny', normalize_audio=normalize_audio)
+            if method == 'crepe':
+                time_user, freq_user = extractor_user.extract_pitch(user_path, step_size=50, use_viterbi=False)
+            else:
+                time_user, freq_user = extractor_user.extract_pitch(user_path)
             
-            # Trích xuất pitch từ reference
+            # Trích xuất pitch từ reference audio (ca sĩ mẫu)
             ref_ext = Path(ref_path).suffix.lower()
             if ref_ext in ['.mid', '.midi']:
+                # Vẫn hỗ trợ MIDI nếu cần
                 self.update_progress("⏳ Đang đọc file MIDI...")
-                time_ref, freq_ref = extractor_user.extract_pitch_from_midi(ref_path)
+                track_filter_value = self.midi_track_var.get()
+                if track_filter_value and track_filter_value != "None" and track_filter_value != "auto":
+                    track_filter = track_filter_value
+                elif track_filter_value == "auto":
+                    track_filter = "auto"
+                else:
+                    track_filter = None
+                pitch_range = None
+                if self.use_pitch_filter_var.get():
+                    pitch_range = (self.midi_pitch_min_var.get(), self.midi_pitch_max_var.get())
+                time_ref, freq_ref = extractor_user.extract_pitch_from_midi(
+                    ref_path,
+                    track_filter=track_filter,
+                    pitch_range=pitch_range
+                )
             else:
-                self.update_progress("⏳ Đang trích xuất pitch từ audio reference...")
-                extractor_ref = PitchExtractor(method=method)
-                time_ref, freq_ref = extractor_ref.extract_pitch(ref_path)
+                # Xử lý audio reference (ca sĩ mẫu) - sử dụng cùng settings với user audio để công bằng
+                self.update_progress("⏳ Đang trích xuất pitch từ audio ca sĩ mẫu...")
+                extractor_ref = PitchExtractor(method=method, model_capacity='tiny', normalize_audio=normalize_audio)
+                # Sử dụng cùng settings với user audio (step_size, viterbi) để đảm bảo công bằng
+                if method == 'crepe':
+                    time_ref, freq_ref = extractor_ref.extract_pitch(ref_path, step_size=50, use_viterbi=False)
+                else:
+                    time_ref, freq_ref = extractor_ref.extract_pitch(ref_path)
             
             # So khớp và tính điểm
             self.update_progress("⏳ Đang so khớp pitch và tính điểm...")
-            matcher = PitchMatcher(tolerance_cents=tolerance)
+            matcher = PitchMatcher(tolerance_cents=tolerance, difficulty_mode=difficulty)
             results = matcher.calculate_score(
                 time_user, freq_user,
                 time_ref, freq_ref
             )
+            
+            # Lưu pitch data để phân tích
+            self.last_pitch_data = (time_user, freq_user, time_ref, freq_ref)
+            
+            # Phân tích và đưa ra lời khuyên
+            self.update_progress("⏳ Đang phân tích và tạo lời khuyên...")
+            try:
+                advisor = PitchAdvisor(tolerance_cents=tolerance)
+                advice_result = advisor.analyze_pitch_contour(
+                    time_user, freq_user,
+                    time_ref, freq_ref
+                )
+                results['advice'] = advice_result
+            except Exception as e:
+                # Nếu có lỗi khi phân tích, vẫn tiếp tục nhưng không có advice
+                print(f"⚠️ Lỗi khi phân tích lời khuyên: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                results['advice'] = None
             
             # Cập nhật kết quả lên GUI
             self.root.after(0, self.display_results, results)
@@ -361,6 +505,10 @@ class KaraokeScorerGUI:
     def display_results(self, results):
         """Hiển thị kết quả lên giao diện"""
         self.current_results = results
+        
+        # Đảm bảo advice được reset nếu không có trong results
+        if 'advice' not in results:
+            results['advice'] = None
         
         # Điểm tổng hợp
         score = results['final_score']
@@ -386,6 +534,59 @@ class KaraokeScorerGUI:
         self.metrics_labels['duration'].config(
             text=f"{results['duration']:.2f} giây"
         )
+        
+        # Hiển thị lời khuyên - Enable trước khi xóa để đảm bảo có thể cập nhật
+        self.advice_text.config(state='normal')
+        # Xóa toàn bộ nội dung cũ
+        self.advice_text.delete('1.0', tk.END)
+        
+        # Kiểm tra và hiển thị advice mới
+        if 'advice' in results and results['advice'] is not None:
+            try:
+                advice_result = results['advice']
+                if isinstance(advice_result, dict):
+                    advice_summary = self.format_advice(advice_result)
+                    self.advice_text.insert('1.0', advice_summary)
+                else:
+                    self.advice_text.insert('1.0', "Lời khuyên đang được tính toán...")
+            except Exception as e:
+                import traceback
+                error_msg = f"Lỗi khi hiển thị lời khuyên: {str(e)}\n{traceback.format_exc()}"
+                print(error_msg)
+                self.advice_text.insert('1.0', f"Lỗi khi hiển thị lời khuyên: {str(e)}")
+        else:
+            # Không có advice - hiển thị thông báo mặc định
+            self.advice_text.insert('1.0', "Chưa có lời khuyên. Vui lòng chạy chấm điểm để nhận lời khuyên.")
+        
+        # Scroll về đầu
+        self.advice_text.see('1.0')
+        self.advice_text.config(state='disabled')  # Chỉ đọc
+    
+    def format_advice(self, advice_result: dict) -> str:
+        """Format lời khuyên để hiển thị"""
+        lines = []
+        
+        if advice_result.get('strengths'):
+            lines.append("✅ ĐIỂM MẠNH:")
+            for strength in advice_result['strengths']:
+                lines.append(f"   • {strength}")
+            lines.append("")
+        
+        if advice_result.get('issues'):
+            lines.append("⚠️ CẦN CẢI THIỆN:")
+            for issue in advice_result['issues']:
+                lines.append(f"   • {issue}")
+            lines.append("")
+        
+        if advice_result.get('advices'):
+            lines.append("💡 LỜI KHUYÊN:")
+            for advice in advice_result['advices']:
+                lines.append(f"   {advice}")
+        
+        if not lines:
+            return "🎉 Tuyệt vời! Bạn đang hát rất tốt!"
+        
+        return "\n".join(lines)
     
     def get_score_color(self, score):
         """Lấy màu dựa trên điểm số"""
@@ -420,21 +621,43 @@ class KaraokeScorerGUI:
         try:
             # Trích xuất pitch
             method = self.method_var.get()
-            extractor_user = PitchExtractor(method=method)
-            time_user, freq_user = extractor_user.extract_pitch(self.user_audio_path.get())
+            normalize_audio = self.normalize_audio_var.get()
+            # Sử dụng tiny model để tăng tốc độ
+            extractor_user = PitchExtractor(method=method, model_capacity='tiny', normalize_audio=normalize_audio)
+            if method == 'crepe':
+                time_user, freq_user = extractor_user.extract_pitch(self.user_audio_path.get(), step_size=50, use_viterbi=False)
+            else:
+                time_user, freq_user = extractor_user.extract_pitch(self.user_audio_path.get())
             
             ref_path = self.reference_path.get()
             ref_ext = Path(ref_path).suffix.lower()
             if ref_ext in ['.mid', '.midi']:
-                time_ref, freq_ref = extractor_user.extract_pitch_from_midi(ref_path)
+                track_filter_value = self.midi_track_var.get()
+                if track_filter_value and track_filter_value != "None" and track_filter_value != "auto":
+                    track_filter = track_filter_value
+                elif track_filter_value == "auto":
+                    track_filter = "auto"
+                else:
+                    track_filter = None
+                pitch_range = None
+                if self.use_pitch_filter_var.get():
+                    pitch_range = (self.midi_pitch_min_var.get(), self.midi_pitch_max_var.get())
+                time_ref, freq_ref = extractor_user.extract_pitch_from_midi(
+                    ref_path,
+                    track_filter=track_filter,
+                    pitch_range=pitch_range
+                )
             else:
-                extractor_ref = PitchExtractor(method=method)
-                time_ref, freq_ref = extractor_ref.extract_pitch(ref_path)
+                extractor_ref = PitchExtractor(method=method, model_capacity='tiny', normalize_audio=normalize_audio)
+                if method == 'crepe':
+                    time_ref, freq_ref = extractor_ref.extract_pitch(ref_path, step_size=50, use_viterbi=False)
+                else:
+                    time_ref, freq_ref = extractor_ref.extract_pitch(ref_path)
             
             # Vẽ biểu đồ
             fig, ax = plt.subplots(figsize=(10, 6))
-            ax.plot(time_user, freq_user, label='Người hát', alpha=0.7, linewidth=1.5, color='#1976D2')
-            ax.plot(time_ref, freq_ref, label='Reference', alpha=0.7, linewidth=1.5, color='#388E3C')
+            ax.plot(time_user, freq_user, label='Người hát', alpha=0.7, linewidth=1.5, color='#FF3333')
+            ax.plot(time_ref, freq_ref, label='Reference', alpha=0.7, linewidth=1.5, color='#009900')
             ax.set_xlabel('Thời gian (s)', fontsize=12)
             ax.set_ylabel('Tần số (Hz)', fontsize=12)
             ax.set_title('Pitch Contour Comparison', fontsize=14, fontweight='bold')

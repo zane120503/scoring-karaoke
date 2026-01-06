@@ -23,3 +23,6 @@ soundfile>=0.10.0
 
 # GUI (optional - only needed if using GUI)
 matplotlib>=3.5.0
+
+# Auto-reload (optional - for development)
+watchdog>=2.1.0

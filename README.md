@@ -4,10 +4,12 @@ Hệ thống chấm điểm karaoke sử dụng **Pitch Detection** mạnh mẽ,
 
 ## ✨ Tính năng
 
-- 🎯 **Pitch Detection mạnh mẽ**: Sử dụng CREPE hoặc Basic Pitch để trích xuất pitch từ audio hỗn hợp
+- 🎯 **Pitch Detection mạnh mẽ**: Sử dụng CREPE hoặc Basic Pitch để trích xuất pitch từ audio
 - 🎵 **So khớp thông minh**: Sử dụng DTW (Dynamic Time Warping) để so khớp pitch người hát với pitch chuẩn
 - 📊 **Điểm số chi tiết**: Cung cấp nhiều metrics (accuracy, DTW score, MAE, ...)
-- 🎼 **Hỗ trợ MIDI**: Có thể so sánh với file MIDI reference hoặc audio ca sĩ mẫu
+- 🎼 **Linh hoạt**: Audio ca sĩ mẫu có thể là:
+  - ✅ Chỉ có giọng (vocal only) - **Khuyến nghị**: Chính xác nhất
+  - ✅ Giọng + nhạc nền (vocal + beat) - Vẫn hoạt động tốt nhờ CREPE robust
 - ⚡ **Không cần tách nhạc**: Hoạt động trực tiếp trên audio hỗn hợp
 
 ## 📋 Yêu cầu
@@ -17,7 +19,15 @@ Hệ thống chấm điểm karaoke sử dụng **Pitch Detection** mạnh mẽ,
 
 ## 🚀 Cài đặt
 
-1. **Clone hoặc tải project**
+> 📖 **Xem hướng dẫn chi tiết:** [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md)
+
+### Cài đặt nhanh (Python Library):
+
+1. **Clone repository:**
+```bash
+git clone <repository-url>
+cd "scoring karaoke"
+```
 
 2. **Cài đặt dependencies:**
 ```bash
@@ -28,6 +38,10 @@ pip install -r requirements.txt
 - CREPE yêu cầu TensorFlow (sẽ tự động cài khi cài `crepe`)
 - **Basic Pitch không được khuyến nghị**: Basic Pitch yêu cầu TensorFlow < 2.15.1, nhưng Python 3.12+ chỉ hỗ trợ TensorFlow >= 2.16.0. Nếu bạn thực sự cần Basic Pitch, hãy dùng Python 3.10 hoặc 3.11.
 - Nếu bạn có `paddlepaddle-gpu` đã cài, có thể có cảnh báo về xung đột protobuf, nhưng không ảnh hưởng đến chức năng chính.
+
+### Build C++ Library:
+
+Xem hướng dẫn chi tiết trong [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md) hoặc [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md).
 
 ## 📖 Hướng dẫn sử dụng
 
@@ -75,14 +89,15 @@ python3 gui.py
 
 ### Cách 2: Sử dụng Command Line
 
-#### So sánh với file MIDI reference:
+#### So sánh với audio ca sĩ mẫu (Khuyến nghị):
 ```bash
-python karaoke_scorer.py --user audio_user.wav --reference reference.mid
+# Audio ca sĩ có thể là: chỉ giọng (tốt nhất) hoặc giọng + nhạc nền (vẫn OK)
+python karaoke_scorer.py --user audio_user.wav --reference reference_singer.wav
 ```
 
-#### So sánh với audio ca sĩ mẫu:
+#### So sánh với file MIDI (Tùy chọn):
 ```bash
-python karaoke_scorer.py --user audio_user.wav --reference reference_audio.wav --method crepe
+python karaoke_scorer.py --user audio_user.wav --reference reference.mid
 ```
 
 #### Sử dụng Basic Pitch thay vì CREPE:
@@ -128,6 +143,27 @@ print(f"Điểm tổng hợp: {results['final_score']:.2f}/100")
 print(f"Độ chính xác: {results['accuracy']:.2f}%")
 ```
 
+### Cách 4: Sử dụng C++ Library (Cho project C++)
+
+Thư viện cung cấp wrapper C++ để tích hợp vào project C++ của bạn.
+
+**Ví dụ cơ bản:**
+```cpp
+#include "KaraokeScorer.h"
+
+int main() {
+    KaraokeScorer scorer;
+    auto result = scorer.score("user_audio.wav", "reference.wav");
+    std::cout << "Điểm: " << result["final_score"] << std::endl;
+    return 0;
+}
+```
+
+**Xem hướng dẫn chi tiết:**
+- [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md) - Hướng dẫn cài đặt và build
+- [INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md) - Hướng dẫn tích hợp vào project C++
+- [QUICK_START.md](QUICK_START.md) - Hướng dẫn nhanh cho C++
+
 ## 📊 Kết quả
 
 Hệ thống trả về các metrics sau:
@@ -144,12 +180,19 @@ Hệ thống trả về các metrics sau:
 ```
 scoring karaoke/
 ├── README.md                 # File này
-├── requirements.txt          # Dependencies
+├── INSTALLATION_GUIDE.md     # Hướng dẫn cài đặt chi tiết
+├── PIPELINE.md               # Tài liệu chi tiết về pipeline
+├── requirements.txt          # Python dependencies
+├── CMakeLists.txt            # CMake config cho C++
+├── KaraokeScorer.h           # Header file C++ library
+├── KaraokeScorer.cpp         # Source file C++ library
+├── library_interface.py       # Python interface
 ├── pitch_extractor.py        # Trích xuất pitch từ audio/MIDI
 ├── pitch_matcher.py          # So khớp pitch và tính điểm
 ├── karaoke_scorer.py         # Script chính (command line)
 ├── gui.py                    # Giao diện đồ họa (GUI)
-├── example_usage.py          # Ví dụ sử dụng trong code
+├── example_usage.py          # Ví dụ sử dụng Python
+├── test_cpp.cpp              # Ví dụ sử dụng C++
 ├── run_gui.bat               # Launcher cho Windows
 └── run_gui.sh                # Launcher cho Linux/Mac
 ```
@@ -168,6 +211,9 @@ scoring karaoke/
 
 ## 🔍 Thuật toán
 
+Xem chi tiết pipeline tại: **[PIPELINE.md](PIPELINE.md)**
+
+Tóm tắt:
 1. **Pitch Extraction**: Trích xuất pitch contour từ audio sử dụng CREPE/Basic Pitch
 2. **Time Alignment**: Căn chỉnh timeline của hai chuỗi pitch
 3. **DTW Matching**: Sử dụng Dynamic Time Warping để so khớp
@@ -178,13 +224,19 @@ scoring karaoke/
 
 ## 💡 Tips
 
-1. **Chất lượng audio**: Audio càng rõ, kết quả càng chính xác
-2. **Giọng hát đủ lớn**: Giọng hát cần đủ lớn so với nhạc nền để model detect được
-3. **Tolerance**: 
+1. **Audio ca sĩ mẫu (Reference Audio)**:
+   - ✅ **Chỉ có giọng (Vocal Only)**: Khuyến nghị - cho kết quả chính xác nhất
+   - ✅ **Giọng + nhạc nền (Vocal + Beat)**: Vẫn hoạt động tốt - CREPE robust với nhạc nền
+   - Audio người hát thường có nhạc nền - điều này hoàn toàn OK
+
+2. **Chất lượng audio**: Audio càng rõ, kết quả càng chính xác
+
+3. **Giọng hát đủ lớn**: Giọng hát cần đủ lớn so với nhạc nền để model detect được
+
+4. **Tolerance**: 
    - 25 cents: Rất chặt (cho người hát chuyên nghiệp)
    - 50 cents: Vừa phải (mặc định)
    - 100 cents: Dễ (cho người mới tập)
-4. **Reference**: MIDI reference thường cho kết quả tốt hơn audio reference
 
 ## 🐛 Xử lý lỗi
 
